@@ -19,6 +19,24 @@ def rotate_poses(poses_3d, R, t):
 
     return poses_3d
 
+transform = np.array([[0,0,0,0,0,0,0.5,0,0,0,0,0,0.5,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0],
+                      [0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0],
+                      [0.2,0,0,0,0,0,0.4,0,0,0,0,0,0.4,0,0,0,0,0,0],
+                      [0,0,0,0.5,0,0,0,0,0,0.5,0,0,0,0,0,0,0,0,0],
+                      [1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0.5,0.5,0,0],
+                      [0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0],
+                      [0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0]])
+
 
 if __name__ == '__main__':
     parser = ArgumentParser(description='Lightweight 3D human pose estimation demo. '
@@ -83,10 +101,14 @@ if __name__ == '__main__':
     p_code = 112
     space_code = 32
     mean_time = 0
+
+    numFrame = 0
+    step = 0
     for frame in frame_provider:
         current_time = cv2.getTickCount()
         if frame is None:
             break
+        frame = cv2.flip(frame, 1)
         input_scale = base_height / frame.shape[0]
         scaled_img = cv2.resize(frame, dsize=None, fx=input_scale, fy=input_scale)
         scaled_img = scaled_img[:, 0:scaled_img.shape[1] - (scaled_img.shape[1] % stride)]  # better to pad, but cut out for demo
@@ -96,6 +118,32 @@ if __name__ == '__main__':
         inference_result = net.infer(scaled_img)
         poses_3d, poses_2d = parse_poses(inference_result, input_scale, stride, fx, is_video)
         edges = []
+
+        # counting steps
+        if len(poses_2d):
+            # print(poses_2d.shape) -> (1,76)
+            # print(poses_2d)
+            if( poses_2d[0,20]>0.2\
+                and poses_2d[0,23]>0.2\
+                and poses_2d[0,38]>0.2\
+                and poses_2d[0,41]>0.2):
+                
+                rightLeg=poses_2d[0,22]-poses_2d[0,19]
+                leftLeg=poses_2d[0,40]-poses_2d[0,37]
+                print([rightLeg,leftLeg])
+                d=rightLeg-leftLeg
+                s=rightLeg+leftLeg
+                if step % 2 == 0 and d > s/25:
+                    step+=1
+                    print("run===================",step)
+
+                elif step%2 == 1 and d < -s/25:
+                    step+=1
+                    print("run===================",step)
+            else:
+                pass
+                #print("lowacc")
+        #end of modify
         if len(poses_3d):
             poses_3d = rotate_poses(poses_3d, R, t)
             poses_3d_copy = poses_3d.copy()
@@ -106,9 +154,25 @@ if __name__ == '__main__':
 
             poses_3d = poses_3d.reshape(poses_3d.shape[0], 19, -1)[:, :, 0:3]
             edges = (Plotter3d.SKELETON_EDGES + 19 * np.arange(poses_3d.shape[0]).reshape((-1, 1, 1))).reshape((-1, 2))
-        plotter.plot(canvas_3d, poses_3d, edges)
-        cv2.imshow(canvas_3d_window_name, canvas_3d)
+        #plotter.plot(canvas_3d, poses_3d, edges)
+        #cv2.imshow(canvas_3d_window_name, canvas_3d)
+        
+        #print(transform.shape)
+        #print(poses_3d.shape)
+        #print('pose_3d: ',poses_3d[0])
+        if len(poses_3d) == 0: 
+            continue
+        pt = np.dot(transform, poses_3d[0])
+        pt = np.concatenate((pt, np.array([[step,0,0]])), axis=0)
 
+        #print(pt)
+        #exit()
+        with open('/home/dianarolien/Documents/Unity_Project/OpenPose-Rig-master/Assets/real-time_pose/'+str(numFrame) +'.txt', 'w') as outfile:
+            np.savetxt(outfile, np.transpose(pt), fmt='%-7.2f')
+        numFrame +=1
+
+
+        #print(poses_2d.shape,poses_2d)
         draw_poses(frame, poses_2d)
         current_time = (cv2.getTickCount() - current_time) / cv2.getTickFrequency()
         if mean_time == 0:
@@ -117,6 +181,7 @@ if __name__ == '__main__':
             mean_time = mean_time * 0.95 + current_time * 0.05
         cv2.putText(frame, 'FPS: {}'.format(int(1 / mean_time * 10) / 10),
                     (40, 80), cv2.FONT_HERSHEY_COMPLEX, 1, (0, 0, 255))
+        frame = cv2.resize(frame, (480, 320))                    # Resize image
         cv2.imshow('ICV 3D Human Pose Estimation', frame)
 
         key = cv2.waitKey(delay)
@@ -127,6 +192,7 @@ if __name__ == '__main__':
                 delay = 0
             else:
                 delay = 1
+        
         if delay == 0 or not is_video:  # allow to rotate 3D canvas while on pause
             key = 0
             while (key != p_code
@@ -139,3 +205,4 @@ if __name__ == '__main__':
                 break
             else:
                 delay = 1
+        
